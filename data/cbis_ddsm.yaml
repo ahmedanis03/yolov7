@@ -1,0 +1,4 @@
+train: ../../datasets/processed/CBIS_DDSM_COCOFORMAT/train_imgs.txt
+val: ../../datasets/processed/CBIS_DDSM_COCOFORMAT/val_imgs.txt
+nc: 2
+names: ["bening", "malignant"]
