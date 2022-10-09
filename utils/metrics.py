@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torchmetrics
 
 from . import general
 
@@ -181,7 +182,108 @@ class ConfusionMatrix:
             print(' '.join(map(str, self.matrix[i])))
 
 
-# Plots ----------------------------------------------------------------------------------------------------------------
+
+class OD_AUCROC:
+    # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
+    def __init__(self, nc, iou_thres=0.5):
+        # self.matrix = np.zeros((nc + 1, nc + 1))
+        if nc == 1:
+            self.roc_lesion = torchmetrics.ROC(num_classes=None )
+            self.roc_image = torchmetrics.ROC(num_classes=None )
+            self.class_modifier = 1
+        else:
+            self.roc_lesion = torchmetrics.ROC(num_classes=nc )
+            self.roc_image = torchmetrics.ROC(num_classes=nc )
+            self.class_modifier = 0
+        self.nc = nc  # number of classes
+        self.iou_thres = iou_thres
+
+    def process_batch(self, detections, labels):
+        """
+        Return intersection-over-union (Jaccard index) of boxes.
+        Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
+        Arguments:
+            detections (Array[N, 6]), x1, y1, x2, y2, conf, class
+            labels (Array[M, 5]), class, x1, y1, x2, y2
+        Returns:
+            None, updates confusion matrix accordingly
+        """
+        # detections = detections[detections[:, 4] > self.conf]
+        if len(detections) == 0:
+            nl = len(labels)
+            if nl == 0:
+                self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
+            else:
+                self.roc_lesion.update(torch.Tensor([0.0]*nl), torch.Tensor([1.0]*nl))
+                self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([1.0]))
+
+            return
+        gt_classes = labels[:, 0].int() + self.class_modifier
+        detection_classes = detections[:, 5].int() + self.class_modifier
+        detection_probs = detections[:, 4].cpu()
+        iou = general.box_iou(labels[:, 1:], detections[:, :4])
+
+        x = torch.where(iou > self.iou_thres)
+        if x[0].shape[0]:
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+            if x[0].shape[0] > 1:
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                matches = matches[matches[:, 2].argsort()[::-1]]
+                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+        else:
+            matches = np.zeros((0, 3))
+
+        n = matches.shape[0] > 0
+        # m0: label indices, m1: detection indices
+        m0, m1, _ = matches.transpose().astype(np.int16)
+
+        image_best_score = torch.Tensor([0.0])
+        for i, gc in enumerate(gt_classes):
+            j = m0 == i
+            if n and sum(j) > 0 and any(detection_classes[m1[j]] == gc):
+                best_score = torch.Tensor([0.0])
+                for idc, dc in enumerate(detection_classes[m1[j]]):
+                    if dc == gc:
+                        best_score = torch.max(best_score, detection_probs[m1[j]][idc]) 
+                        image_best_score = torch.max(image_best_score, best_score)
+                self.roc_lesion.update(best_score, torch.Tensor([gc]))
+            else:
+                self.roc_lesion.update(torch.Tensor([0.0]), torch.Tensor([gc]))
+        # This cannot be multi-class based on image level definition
+        if len(labels) == 0:
+            self.roc_image.update(image_best_score, torch.Tensor([0]))
+        else:
+            self.roc_image.update(image_best_score, torch.Tensor([1.0]))
+
+    def score(self):
+        lesion_fpr, lesion_tpr, lesion_thresholds = self.roc_lesion.compute()
+        image_fpr, image_tpr, image_thresholds = self.roc_image.compute()
+        return torchmetrics.functional.auc(lesion_fpr, lesion_tpr).item(), torchmetrics.functional.auc(image_fpr, image_tpr).item()
+         
+
+    def plot(self):
+        
+        # plot roc curve using matplotlib
+        image_fpr, image_tpr, image_thresholds = self.roc_image.compute()
+        lesion_fpr, lesion_tpr, lesion_thresholds = self.roc_lesion.compute()
+        image_roc_auc = torchmetrics.functional.auc(image_fpr, image_tpr).item()
+        lesion_roc_auc = torchmetrics.functional.auc(lesion_fpr, lesion_tpr).item()
+        plt.title('ROC Curve')
+        plt.plot(image_fpr, image_tpr, marker='.', color='green', label='Image ROC_AUC = %0.2f' % image_roc_auc)
+
+        plt.plot(lesion_fpr, lesion_tpr, marker='-', color='red', label='Lesion ROC_AUC = %0.2f' % lesion_roc_auc)
+        # axis labels
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        # show the legend
+        plt.legend()
+        # show the plot
+        plt.show()
+
+
+    def print(self):
+        print('lesion roc auc: ', self.roc_lesion.compute(), 'image roc auc: ', self.roc_image.compute())
 
 def plot_pr_curve(px, py, ap, save_dir='pr_curve.png', names=()):
     # Precision-recall curve
