@@ -410,6 +410,7 @@ def train(hyp, opt, device, tb_writer=None):
             if not opt.notest or final_epoch:  # Calculate mAP
                 wandb_logger.current_epoch = epoch + 1
 
+                #ADD METRIC, update here
                 results, maps, times, rocaucs = test.test(data_dict,
                                                                 batch_size=batch_size * 2,
                                                                 imgsz=imgsz_test,
@@ -430,10 +431,11 @@ def train(hyp, opt, device, tb_writer=None):
                 os.system('gsutil cp %s gs://%s/results/results%s.txt' % (results_file, opt.bucket, opt.name))
 
             # Log
+            #ADD METRIC, update here
             tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
                     'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',
                     'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
-                    'val/lesion_auc', 'val/image_auc',
+                    'val/lesion_auc', 'val/image_auc', 'val/image_auc_nonloc'
                     'x/lr0', 'x/lr1', 'x/lr2']  # params
             for x, tag in zip(list(mloss[:-1]) + list(results + rocaucs) + lr, tags):
                 if tb_writer:

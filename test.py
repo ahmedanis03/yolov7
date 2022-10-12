@@ -94,7 +94,8 @@ def test(data,
     aucroc_metric = OD_AUCROC(nc=nc)
     names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     coco91class = coco80_to_coco91_class()
-    s = ('%20s' + '%12s' * 8) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95', 'Lesion AUC', 'Image AUC')
+    #ADD METRIC, update here
+    s = ('%20s' + '%12s' * 9) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95', 'Lesion AUC', 'Image AUC', 'Image AUC Non Loc')
     p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
@@ -229,11 +230,13 @@ def test(data,
     else:
         nt = torch.zeros(1)
     
-    lesion_auc, image_auc = aucroc_metric.score()
+    #ADD METRIC, update here
+    lesion_auc, image_auc, image_nonloc = aucroc_metric.score()
 
     # Print results
-    pf = '%20s' + '%12i' * 2 + '%12.3g' * 6  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map, lesion_auc, image_auc))
+    pf = '%20s' + '%12i' * 2 + '%12.3g' * 7  # print format
+    #ADD METRIC, update here
+    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map, lesion_auc, image_auc, image_nonloc))
 
     # Print results per class
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
@@ -287,7 +290,8 @@ def test(data,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t, (lesion_auc, image_auc)
+    #ADD METRIC, update here
+    return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t, (lesion_auc, image_auc, image_nonloc)
 
 
 if __name__ == '__main__':

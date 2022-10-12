@@ -190,10 +190,12 @@ class OD_AUCROC:
         if nc == 1:
             self.roc_lesion = torchmetrics.ROC(num_classes=None )
             self.roc_image = torchmetrics.ROC(num_classes=None )
+            self.roc_image_noloc = torchmetrics.ROC(num_classes=None )
             self.class_modifier = 1
         else:
             self.roc_lesion = torchmetrics.ROC(num_classes=nc )
             self.roc_image = torchmetrics.ROC(num_classes=nc )
+            self.roc_image_noloc = torchmetrics.ROC(num_classes=nc )
             self.class_modifier = 0
         self.nc = nc  # number of classes
         self.iou_thres = iou_thres
@@ -209,18 +211,27 @@ class OD_AUCROC:
             None, updates confusion matrix accordingly
         """
         # detections = detections[detections[:, 4] > self.conf]
+
+        detection_probs = detections[:, 4].cpu()
+        nl = len(labels)
         if len(detections) == 0:
-            nl = len(labels)
             if nl == 0:
                 self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
+                self.roc_image_noloc.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
             else:
                 self.roc_lesion.update(torch.Tensor([0.0]*nl), torch.Tensor([1.0]*nl))
                 self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([1.0]))
-
+                self.roc_image_noloc.update(torch.Tensor([0.0]), torch.Tensor([1.0]))
             return
+        else:
+            if nl == 0:
+                self.roc_image.update(torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.]))
+                self.roc_image_noloc.update(torch.max(detection_probs, 0, keepdim=True)[0],  torch.Tensor([0.0]))
+            else:
+                self.roc_image_noloc.update(torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([1.0]))
+
         gt_classes = labels[:, 0].int() + self.class_modifier
         detection_classes = detections[:, 5].int() + self.class_modifier
-        detection_probs = detections[:, 4].cpu()
         iou = general.box_iou(labels[:, 1:], detections[:, :4])
 
         x = torch.where(iou > self.iou_thres)
@@ -251,15 +262,14 @@ class OD_AUCROC:
             else:
                 self.roc_lesion.update(torch.Tensor([0.0]), torch.Tensor([gc]))
         # This cannot be multi-class based on image level definition
-        if len(labels) == 0:
-            self.roc_image.update(image_best_score, torch.Tensor([0]))
-        else:
+        if nl > 0:
             self.roc_image.update(image_best_score, torch.Tensor([1.0]))
 
     def score(self):
         lesion_fpr, lesion_tpr, lesion_thresholds = self.roc_lesion.compute()
         image_fpr, image_tpr, image_thresholds = self.roc_image.compute()
-        return torchmetrics.functional.auc(lesion_fpr, lesion_tpr).item(), torchmetrics.functional.auc(image_fpr, image_tpr).item()
+        image_nonlocal_frp, image_nonlocal_tpr, image_nonlocal_thresholds = self.roc_image_noloc.compute()
+        return torchmetrics.functional.auc(lesion_fpr, lesion_tpr).item(), torchmetrics.functional.auc(image_fpr, image_tpr).item(),torchmetrics.functional.auc(image_nonlocal_frp, image_nonlocal_tpr).item()
          
 
     def plot(self):
