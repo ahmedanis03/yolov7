@@ -32,6 +32,7 @@ from utils.general import (
     labels_to_image_weights,
     init_seeds,
     fitness,
+    fitness_roc,
     strip_optimizer,
     get_latest_run,
     check_dataset,
@@ -368,6 +369,22 @@ def train(hyp, opt, device, tb_writer=None):
             prefix=colorstr("val: "),
         )[0]
 
+        final_testloader = create_dataloader(
+            final_test_path,
+            imgsz_test,
+            batch_size * 2,
+            gs,
+            opt,  # testloader
+            hyp=hyp,
+            cache=opt.cache_images and not opt.notest,
+            rect=True,
+            rank=-1,
+            world_size=opt.world_size,
+            workers=opt.workers,
+            pad=0.5,
+            prefix=colorstr("test: "),
+        )[0]
+
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
             c = torch.tensor(labels[:, 0])  # classes
@@ -627,25 +644,25 @@ def train(hyp, opt, device, tb_writer=None):
             # Log
             # ADD METRIC, update here
             tags = [
-                "train/box_loss",
-                "train/obj_loss",
-                "train/cls_loss",  # train loss
-                "metrics/precision",
-                "metrics/recall",
-                "metrics/mAP_0.5",
-                "metrics/mAP_0.5:0.95",
-                "val/box_loss",
-                "val/obj_loss",
-                "val/cls_loss",  # val loss
-                "val/lesion_auc",
-                "val/image_auc",
-                "val/image_auc_nonloc",
-                "val/lesion_pauc_froc",
-                "val/image_pauc_froc",
-                "val/image_pauc_nonloc_froc",
-                "x/lr0",
-                "x/lr1",
-                "x/lr2",
+                "train_loss/box_loss",
+                "train_loss/obj_loss",
+                "train_loss/cls_loss",  # train loss
+                "val_metrics/precision",
+                "val_metrics/recall",
+                "val_metrics/mAP_0.5",
+                "val_metrics/mAP_0.5:0.95",
+                "val_loss/box_loss",
+                "val_loss/obj_loss",
+                "val_loss/cls_loss",  # val loss
+                "val_(f)roc/lesion_auc",
+                "val_(f)roc/image_auc",
+                "val_(f)roc/image_auc_nonloc",
+                "val_(f)roc/lesion_pauc_froc",
+                "val_(f)roc/image_pauc_froc",
+                "val_(f)roc/image_pauc_nonloc_froc",
+                "lr/lr0",
+                "lr/lr1",
+                "lr/lr2",
             ]  # params
             for x, tag in zip(list(mloss[:-1]) + list(results + rocaucs) + lr, tags):
                 if tb_writer:
@@ -654,8 +671,11 @@ def train(hyp, opt, device, tb_writer=None):
                     wandb_logger.log({tag: x})  # W&B
 
             # Update best mAP
-            fi = fitness(
-                np.array(results).reshape(1, -1)
+            # fi = fitness(
+            #     np.array(results).reshape(1, -1)
+            # )  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            fi = fitness_roc(
+                np.array(rocaucs).reshape(1, -1)
             )  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
             if fi > best_fitness:
                 best_fitness = fi
@@ -741,6 +761,61 @@ def train(hyp, opt, device, tb_writer=None):
                     plots=False,
                     is_coco=is_coco,
                 )
+
+        # RUN ON TEST DATA CUSTOM
+
+        # ADD METRIC, update here
+        final_epoch = True
+
+        test_results, test_maps, test_times, test_rocaucs = test.test(
+            data_dict,
+            batch_size=batch_size * 2,
+            imgsz=imgsz_test,
+            model=attempt_load(best, device).half(),
+            single_cls=opt.single_cls,
+            dataloader=final_testloader,
+            save_dir=save_dir,
+            verbose=nc < 50 and final_epoch,
+            plots=plots and final_epoch,
+            wandb_logger=wandb_logger,
+            compute_loss=compute_loss,
+            is_coco=is_coco,
+        )
+
+        # Write
+        with open(test_results_file, "a") as f:
+            # ADD METRIC, update here
+            f.write(
+                s + "%10.4g" * 13 % (test_results + test_rocaucs) + "\n"
+            )  # append metrics, val_loss
+        if len(opt.name) and opt.bucket:
+            os.system(
+                "gsutil cp %s gs://%s/results/results%s.txt"
+                % (test_results_file, opt.bucket, opt.name)
+            )
+
+        # Log
+        # ADD METRIC, update here
+        tags = [
+            "test_metrics/precision",
+            "test_metrics/recall",
+            "test_metrics/mAP_0.5",
+            "test_metrics/mAP_0.5:0.95",
+            "test_loss/box_loss",
+            "test_loss/obj_loss",
+            "test_loss/cls_loss",  # test loss
+            "test_(f)roc/lesion_auc",
+            "test_(f)roc/image_auc",
+            "test_(f)roc/image_auc_nonloc",
+            "test_(f)roc/lesion_pauc_froc",
+            "test_(f)roc/image_pauc_froc",
+            "test_(f)roc/image_pauc_nonloc_froc",
+        ]  # params
+        for x, tag in zip(list(test_results + test_rocaucs), tags):
+            if tb_writer:
+                tb_writer.add_scalar(tag, x, epoch)  # tensorboard
+            if wandb_logger.wandb:
+                wandb_logger.log({tag: x})  # W&B
 
         # Strip optimizers
         final = best if best.exists() else last  # final model
