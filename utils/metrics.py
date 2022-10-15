@@ -23,7 +23,7 @@ def fitness_roc(x):
     # "val_(f)roc/lesion_pauc_froc",
     # "val_(f)roc/image_pauc_froc",
     # "val_(f)roc/image_pauc_nonloc_froc",
-    return x[2]
+    return x[0][2]
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir=".", names=()):
