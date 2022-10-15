@@ -201,7 +201,7 @@ class ConfusionMatrix:
 
 class OD_AUCROC:
     # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
-    def __init__(self, nc, iou_thres=0.5):
+    def __init__(self, nc, iou_thres=0.5, fm_img_ths=1.0):
         # self.matrix = np.zeros((nc + 1, nc + 1))
         if nc == 1:
             self.roc_lesion = torchmetrics.ROC(num_classes=None)
@@ -213,8 +213,10 @@ class OD_AUCROC:
             self.roc_image = torchmetrics.ROC(num_classes=nc)
             self.roc_image_noloc = torchmetrics.ROC(num_classes=nc)
             self.class_modifier = 0
+        self.markers_in_normal_image = []
         self.nc = nc  # number of classes
         self.iou_thres = iou_thres
+        self.fm_img_ths = fm_img_ths
 
     def process_batch(self, detections, labels):
         """
@@ -244,6 +246,7 @@ class OD_AUCROC:
             return
         else:
             if nl == 0:
+                self.markers_in_normal_image.append(detection_probs)
                 self.roc_lesion.update(
                     torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0])
                 )
@@ -299,18 +302,64 @@ class OD_AUCROC:
             self.roc_image.update(image_best_score, torch.Tensor([1.0]))
 
     def score(self):
+        # Lesion level
         lesion_fpr, lesion_tpr, lesion_thresholds = self.roc_lesion.compute()
+
+        froc_lesion_tpr, froc_lesion_fm_img = self.froc_curve(
+            lesion_tpr, lesion_thresholds
+        )
+        auc_roc_lesion = torchmetrics.functional.auc(lesion_fpr, lesion_tpr)
+        partial_fm_img_idx = froc_lesion_fm_img <= self.fm_img_ths
+        pauc_froc_lesion = torchmetrics.functional.auc(
+            froc_lesion_tpr[partial_fm_img_idx], froc_lesion_fm_img[partial_fm_img_idx]
+        )
+
+        # Image level
+        ## roc
         image_fpr, image_tpr, image_thresholds = self.roc_image.compute()
+
+        auc_roc_image = torchmetrics.functional.auc(image_fpr, image_tpr)
+        froc_image_tpr, froc_image_fm_img = self.froc_curve(image_tpr, image_thresholds)
+        partial_fm_img_idx = froc_image_fm_img <= self.fm_img_ths
+        pauc_froc_image = torchmetrics.functional.auc(
+            froc_image_tpr[partial_fm_img_idx], froc_image_fm_img[partial_fm_img_idx]
+        )
+
+        # Image level non-local
         (
             image_nonlocal_frp,
             image_nonlocal_tpr,
             image_nonlocal_thresholds,
         ) = self.roc_image_noloc.compute()
-        return (
-            torchmetrics.functional.auc(lesion_fpr, lesion_tpr).item(),
-            torchmetrics.functional.auc(image_fpr, image_tpr).item(),
-            torchmetrics.functional.auc(image_nonlocal_frp, image_nonlocal_tpr).item(),
+
+        auc_roc_image_nonloc = torchmetrics.functional.auc(
+            image_nonlocal_frp, image_nonlocal_tpr
         )
+        froc_image_nonloc_tpr, froc_image_nonloc_fm_img = self.froc_curve(
+            image_nonlocal_tpr, image_nonlocal_thresholds
+        )
+        partial_fm_img_idx = froc_image_nonloc_fm_img <= self.fm_img_ths
+        pauc_froc_image_nonloc = torchmetrics.functional.auc(
+            froc_image_nonloc_tpr[partial_fm_img_idx],
+            froc_image_nonloc_fm_img[partial_fm_img_idx],
+        )
+        return (
+            auc_roc_lesion.item(),
+            auc_roc_image.item(),
+            auc_roc_image_nonloc.item(),
+            pauc_froc_lesion.item(),
+            pauc_froc_image.item(),
+            pauc_froc_image_nonloc.item(),
+        )
+
+    def froc_curve(self, tpr, thresholds):
+        avg_fm_image_per_ths = []
+        n_normal_images = len(self.markers_in_normal_image)
+        for threshold in thresholds:
+            markers = torch.cat(self.markers_in_normal_image)
+            avg_fm_image = torch.sum(markers > threshold) / n_normal_images
+            avg_fm_image_per_ths.append(avg_fm_image)
+        return tpr, torch.stack(avg_fm_image_per_ths)
 
     def plot(self):
 

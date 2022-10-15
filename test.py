@@ -135,7 +135,7 @@ def test(
     }
     coco91class = coco80_to_coco91_class()
     # ADD METRIC, update here
-    s = ("%20s" + "%12s" * 9) % (
+    s = ("%20s" + "%12s" * 12) % (
         "Class",
         "Images",
         "Labels",
@@ -146,6 +146,9 @@ def test(
         "Lesion AUC",
         "Image AUC",
         "Image AUC Non Loc",
+        "Lesion PAUC FROC",
+        "Image PAUC FROC",
+        "Image PAUC FROC Non Loc",
     )
     p, r, f1, mp, mr, map50, map, t0, t1 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     loss = torch.zeros(3, device=device)
@@ -365,11 +368,18 @@ def test(
         nt = torch.zeros(1)
 
     # ADD METRIC, update here
-    lesion_auc, image_auc, image_nonloc = aucroc_metric.score()
+    (
+        lesion_auc,
+        image_auc,
+        image_auc_nonloc,
+        lesion_pauc_froc,
+        image_pauc_froc,
+        image_pauc_nonloc_froc,
+    ) = aucroc_metric.score()
 
     # Print results
-    pf = "%20s" + "%12i" * 2 + "%12.3g" * 7  # print format
     # ADD METRIC, update here
+    pf = "%20s" + "%12i" * 2 + "%12.3g" * 10  # print format
     print(
         pf
         % (
@@ -382,7 +392,10 @@ def test(
             map,
             lesion_auc,
             image_auc,
-            image_nonloc,
+            image_auc_nonloc,
+            lesion_pauc_froc,
+            image_pauc_froc,
+            image_pauc_nonloc_froc,
         )
     )
 
@@ -463,7 +476,14 @@ def test(
         (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()),
         maps,
         t,
-        (lesion_auc, image_auc, image_nonloc),
+        (
+            lesion_auc,
+            image_auc,
+            image_auc_nonloc,
+            lesion_pauc_froc,
+            image_pauc_froc,
+            image_pauc_nonloc_froc,
+        ),
     )
 
 

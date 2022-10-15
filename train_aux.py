@@ -616,7 +616,7 @@ def train(hyp, opt, device, tb_writer=None):
             with open(results_file, "a") as f:
                 # ADD METRIC, update here
                 f.write(
-                    s + "%10.4g" * 10 % (results + rocaucs) + "\n"
+                    s + "%10.4g" * 13 % (results + rocaucs) + "\n"
                 )  # append metrics, val_loss
             if len(opt.name) and opt.bucket:
                 os.system(
@@ -640,6 +640,9 @@ def train(hyp, opt, device, tb_writer=None):
                 "val/lesion_auc",
                 "val/image_auc",
                 "val/image_auc_nonloc",
+                "val/lesion_pauc_froc",
+                "val/image_pauc_froc",
+                "val/image_pauc_nonloc_froc",
                 "x/lr0",
                 "x/lr1",
                 "x/lr2",
