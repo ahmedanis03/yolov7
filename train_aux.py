@@ -79,6 +79,7 @@ def train(hyp, opt, device, tb_writer=None):
     last = wdir / "last.pt"
     best = wdir / "best.pt"
     results_file = save_dir / "results.txt"
+    test_results_file = save_dir / "test_results.txt"
 
     # Save run settings
     with open(save_dir / "hyp.yaml", "w") as f:
@@ -156,6 +157,7 @@ def train(hyp, opt, device, tb_writer=None):
         check_dataset(data_dict)  # check
     train_path = data_dict["train"]
     test_path = data_dict["val"]
+    final_test_path = data_dict["test"]
 
     # Freeze
     freeze = []  # parameter names to freeze (full or partial)
