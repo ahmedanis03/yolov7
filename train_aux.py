@@ -780,7 +780,8 @@ def train(hyp, opt, device, tb_writer=None):
             verbose=nc < 50 and final_epoch,
             plots=plots and final_epoch,
             wandb_logger=wandb_logger,
-            compute_loss=compute_loss,
+            # FIXME: why!!
+            compute_loss=None,
             is_coco=is_coco,
         )
 
