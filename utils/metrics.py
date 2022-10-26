@@ -244,6 +244,7 @@ class OD_AUCROC:
         nl = len(labels)
         if len(detections) == 0:
             if nl == 0:
+                self.markers_in_normal_image.append(detection_probs)
                 self.roc_lesion.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
                 self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
                 self.roc_image_noloc.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
