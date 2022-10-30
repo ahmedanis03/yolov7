@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 
 def train(hyp, opt, device, tb_writer=None):
+
     logger.info(
         colorstr("hyperparameters: ") + ", ".join(f"{k}={v}" for k, v in hyp.items())
     )
@@ -433,7 +434,11 @@ def train(hyp, opt, device, tb_writer=None):
     # Start training
     t0 = time.time()
     nw = max(
-        round(hyp["warmup_epochs"] * nb), 1000
+        # FIXME: DEBUG
+        round(hyp["warmup_epochs"] * nb),
+        1000
+        # round(hyp["warmup_epochs"] * nb),
+        # 100,
     )  # number of warmup iterations, max(3 epochs, 1k iterations)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     maps = np.zeros(nc)  # mAP per class
@@ -557,6 +562,8 @@ def train(hyp, opt, device, tb_writer=None):
             scaler.scale(loss).backward()
 
             # Optimize
+            # if accumulate > 1:
+            #     print(f"\n*****accumelate: {accumulate}*****\n")
             if ni % accumulate == 0:
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
@@ -600,6 +607,8 @@ def train(hyp, opt, device, tb_writer=None):
                             ]
                         }
                     )
+                # FIXME: remove, only for debugging
+                # break
 
             # end batch ------------------------------------------------------------------------------------------------
         # end epoch ----------------------------------------------------------------------------------------------------
@@ -962,6 +971,9 @@ if __name__ == "__main__":
         default=[0],
         help="Freeze layers: backbone of yolov7=50, first3=0 1 2",
     )
+    parser.add_argument(
+        "--initial_lr", type=float, default=0.0, help="Initial learning rate"
+    )
     opt = parser.parse_args()
 
     # Set DDP variables
@@ -1033,6 +1045,10 @@ if __name__ == "__main__":
     # Hyperparameters
     with open(opt.hyp) as f:
         hyp = yaml.load(f, Loader=yaml.SafeLoader)  # load hyps
+
+    # override learning rate
+    if opt.initial_lr:
+        hyp["lr0"] = opt.initial_lr
 
     # Train
     logger.info(opt)

@@ -953,6 +953,9 @@ if __name__ == "__main__":
         default="latest",
         help="version of dataset artifact to be used",
     )
+    parser.add_argument(
+        "--initial_lr", type=float, default=0.0, help="Initial learning rate"
+    )
     opt = parser.parse_args()
 
     # Set DDP variables
@@ -1024,6 +1027,10 @@ if __name__ == "__main__":
     # Hyperparameters
     with open(opt.hyp) as f:
         hyp = yaml.load(f, Loader=yaml.SafeLoader)  # load hyps
+
+    # override learning rate
+    if opt.initial_lr:
+        hyp["lr0"] = opt.initial_lr
 
     # Train
     logger.info(opt)
