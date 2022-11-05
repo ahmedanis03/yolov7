@@ -65,12 +65,8 @@ def test(
         device = select_device(opt.device, batch_size=batch_size)
 
         # Directories
-        save_dir = Path(
-            increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok)
-        )  # increment run
-        (save_dir / "labels" if save_txt else save_dir).mkdir(
-            parents=True, exist_ok=True
-        )  # make dir
+        save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+        (save_dir / "labels" if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
         model = attempt_load(weights, map_location=device)  # load FP32 model
@@ -81,9 +77,7 @@ def test(
             model = TracedModel(model, device, opt.img_size)
 
     # Half
-    half = (
-        device.type != "cpu" and half_precision
-    )  # half precision only supported on CUDA
+    half = device.type != "cpu" and half_precision  # half precision only supported on CUDA
     if half:
         model.half()
 
@@ -105,14 +99,8 @@ def test(
     # Dataloader
     if not training:
         if device.type != "cpu":
-            model(
-                torch.zeros(1, 3, imgsz, imgsz)
-                .to(device)
-                .type_as(next(model.parameters()))
-            )  # run once
-        task = (
-            opt.task if opt.task in ("train", "val", "test") else "val"
-        )  # path to train/val/test images
+            model(torch.zeros(1, 3, imgsz, imgsz).to(device).type_as(next(model.parameters())))  # run once
+        task = opt.task if opt.task in ("train", "val", "test") else "val"  # path to train/val/test images
         dataloader = create_dataloader(
             data[task],
             imgsz,
@@ -127,12 +115,7 @@ def test(
     seen = 0
     confusion_matrix = ConfusionMatrix(nc=nc)
     aucroc_metric = OD_AUCROC(nc=nc)
-    names = {
-        k: v
-        for k, v in enumerate(
-            model.names if hasattr(model, "names") else model.module.names
-        )
-    }
+    names = {k: v for k, v in enumerate(model.names if hasattr(model, "names") else model.module.names)}
     coco91class = coco80_to_coco91_class()
     # ADD METRIC, update here
     s = ("%20s" + "%12s" * 12) % (
@@ -163,26 +146,16 @@ def test(
         with torch.no_grad():
             # Run model
             t = time_synchronized()
-            out, train_out = model(
-                img, augment=augment
-            )  # inference and training outputs
+            out, train_out = model(img, augment=augment)  # inference and training outputs
             t0 += time_synchronized() - t
 
             # Compute loss
             if compute_loss:
-                loss += compute_loss([x.float() for x in train_out], targets)[1][
-                    :3
-                ]  # box, obj, cls
+                loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
 
             # Run NMS
-            targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(
-                device
-            )  # to pixels
-            lb = (
-                [targets[targets[:, 0] == i, 1:] for i in range(nb)]
-                if save_hybrid
-                else []
-            )  # for autolabelling
+            targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
+            lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
             t = time_synchronized()
             out = non_max_suppression(
                 out,
@@ -203,44 +176,25 @@ def test(
 
             if len(pred) == 0:
                 if nl:
-                    stats.append(
-                        (
-                            torch.zeros(0, niou, dtype=torch.bool),
-                            torch.Tensor(),
-                            torch.Tensor(),
-                            tcls,
-                        )
-                    )
+                    stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
                 aucroc_metric.process_batch(pred, labels)
                 continue
 
             # Predictions
             predn = pred.clone()
-            scale_coords(
-                img[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1]
-            )  # native-space pred
+            scale_coords(img[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
 
             # Append to text file
             if save_txt:
-                gn = torch.tensor(shapes[si][0])[
-                    [1, 0, 1, 0]
-                ]  # normalization gain whwh
+                gn = torch.tensor(shapes[si][0])[[1, 0, 1, 0]]  # normalization gain whwh
                 for *xyxy, conf, cls in predn.tolist():
-                    xywh = (
-                        (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
-                        .view(-1)
-                        .tolist()
-                    )  # normalized xywh
-                    line = (
-                        (cls, *xywh, conf) if save_conf else (cls, *xywh)
-                    )  # label format
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                     with open(save_dir / "labels" / (path.stem + ".txt"), "a") as f:
                         f.write(("%g " * len(line)).rstrip() % line + "\n")
 
             # W&B logging - Media Panel Plots
-            if (
-                len(wandb_images) < log_imgs and wandb_logger.current_epoch > 0
-            ):  # Check for test operation
+            if len(wandb_images) < log_imgs and wandb_logger.current_epoch > 0:  # Check for test operation
                 if wandb_logger.current_epoch % wandb_logger.bbox_interval == 0:
                     box_data = [
                         {
@@ -257,17 +211,9 @@ def test(
                         }
                         for *xyxy, conf, cls in pred.tolist()
                     ]
-                    boxes = {
-                        "predictions": {"box_data": box_data, "class_labels": names}
-                    }  # inference-space
-                    wandb_images.append(
-                        wandb_logger.wandb.Image(
-                            img[si], boxes=boxes, caption=path.name
-                        )
-                    )
-            wandb_logger.log_training_progress(
-                predn, path, names
-            ) if wandb_logger and wandb_logger.wandb_run else None
+                    boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
+                    wandb_images.append(wandb_logger.wandb.Image(img[si], boxes=boxes, caption=path.name))
+            wandb_logger.log_training_progress(predn, path, names) if wandb_logger and wandb_logger.wandb_run else None
 
             # Append to pycocotools JSON dictionary
             if save_json:
@@ -279,9 +225,7 @@ def test(
                     jdict.append(
                         {
                             "image_id": image_id,
-                            "category_id": coco91class[int(p[5])]
-                            if is_coco
-                            else int(p[5]),
+                            "category_id": coco91class[int(p[5])] if is_coco else int(p[5]),
                             "bbox": [round(x, 3) for x in b],
                             "score": round(p[4], 5),
                         }
@@ -295,32 +239,22 @@ def test(
 
                 # target boxes
                 tbox = xywh2xyxy(labels[:, 1:5])
-                scale_coords(
-                    img[si].shape[1:], tbox, shapes[si][0], shapes[si][1]
-                )  # native-space labels
+                scale_coords(img[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
                 if plots:
-                    confusion_matrix.process_batch(
-                        predn, torch.cat((labels[:, 0:1], tbox), 1)
-                    )
+                    confusion_matrix.process_batch(predn, torch.cat((labels[:, 0:1], tbox), 1))
 
                 # Calculate AUC ROC
                 aucroc_metric.process_batch(predn, torch.cat((labels[:, 0:1], tbox), 1))
 
                 # Per target class
                 for cls in torch.unique(tcls_tensor):
-                    ti = (
-                        (cls == tcls_tensor).nonzero(as_tuple=False).view(-1)
-                    )  # prediction indices
-                    pi = (
-                        (cls == pred[:, 5]).nonzero(as_tuple=False).view(-1)
-                    )  # target indices
+                    ti = (cls == tcls_tensor).nonzero(as_tuple=False).view(-1)  # prediction indices
+                    pi = (cls == pred[:, 5]).nonzero(as_tuple=False).view(-1)  # target indices
 
                     # Search for detections
                     if pi.shape[0]:
                         # Prediction to target ious
-                        ious, i = box_iou(predn[pi, :4], tbox[ti]).max(
-                            1
-                        )  # best ious, indices
+                        ious, i = box_iou(predn[pi, :4], tbox[ti]).max(1)  # best ious, indices
 
                         # Append detections
                         detected_set = set()
@@ -330,9 +264,7 @@ def test(
                                 detected_set.add(d.item())
                                 detected.append(d)
                                 correct[pi[j]] = ious[j] > iouv  # iou_thres is 1xn
-                                if (
-                                    len(detected) == nl
-                                ):  # all targets already located in image
+                                if len(detected) == nl:  # all targets already located in image
                                     break
             else:
                 aucroc_metric.process_batch(predn, labels)
@@ -343,9 +275,7 @@ def test(
         # Plot images
         if plots and batch_i < 3:
             f = save_dir / f"test_batch{batch_i}_labels.jpg"  # labels
-            Thread(
-                target=plot_images, args=(img, targets, paths, f, names), daemon=True
-            ).start()
+            Thread(target=plot_images, args=(img, targets, paths, f, names), daemon=True).start()
             f = save_dir / f"test_batch{batch_i}_pred.jpg"  # predictions
             Thread(
                 target=plot_images,
@@ -356,14 +286,10 @@ def test(
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
-        p, r, ap, f1, ap_class = ap_per_class(
-            *stats, plot=plots, save_dir=save_dir, names=names
-        )
+        p, r, ap, f1, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names)
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
-        nt = np.bincount(
-            stats[3].astype(np.int64), minlength=nc
-        )  # number of targets per class
+        nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
     else:
         nt = torch.zeros(1)
 
@@ -411,30 +337,20 @@ def test(
         batch_size,
     )  # tuple
     if not training:
-        print(
-            "Speed: %.1f/%.1f/%.1f ms inference/NMS/total per %gx%g image at batch-size %g"
-            % t
-        )
+        print("Speed: %.1f/%.1f/%.1f ms inference/NMS/total per %gx%g image at batch-size %g" % t)
 
     # Plots
     if plots:
         confusion_matrix.plot(save_dir=save_dir, names=list(names.values()))
         if wandb_logger and wandb_logger.wandb:
-            val_batches = [
-                wandb_logger.wandb.Image(str(f), caption=f.name)
-                for f in sorted(save_dir.glob("test*.jpg"))
-            ]
+            val_batches = [wandb_logger.wandb.Image(str(f), caption=f.name) for f in sorted(save_dir.glob("test*.jpg"))]
             wandb_logger.log({"Validation": val_batches})
     if wandb_images:
         wandb_logger.log({"Bounding Box Debugger/Images": wandb_images})
 
     # Save JSON
     if save_json and len(jdict):
-        w = (
-            Path(weights[0] if isinstance(weights, list) else weights).stem
-            if weights is not None
-            else ""
-        )  # weights
+        w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ""  # weights
         anno_json = "./coco/annotations/instances_val2017.json"  # annotations json
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         print("\nEvaluating pycocotools mAP... saving %s..." % pred_json)
@@ -449,9 +365,7 @@ def test(
             pred = anno.loadRes(pred_json)  # init predictions api
             eval = COCOeval(anno, pred, "bbox")
             if is_coco:
-                eval.params.imgIds = [
-                    int(Path(x).stem) for x in dataloader.dataset.img_files
-                ]  # image IDs to evaluate
+                eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
             eval.evaluate()
             eval.accumulate()
             eval.summarize()
@@ -462,11 +376,7 @@ def test(
     # Return results
     model.float()  # for training
     if not training:
-        s = (
-            f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}"
-            if save_txt
-            else ""
-        )
+        s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ""
         print(f"Results saved to {save_dir}{s}")
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
@@ -489,56 +399,24 @@ def test(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="test.py")
-    parser.add_argument(
-        "--weights", nargs="+", type=str, default="yolov7.pt", help="model.pt path(s)"
-    )
-    parser.add_argument(
-        "--data", type=str, default="data/coco.yaml", help="*.data path"
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=32, help="size of each image batch"
-    )
-    parser.add_argument(
-        "--img-size", type=int, default=640, help="inference size (pixels)"
-    )
-    parser.add_argument(
-        "--conf-thres", type=float, default=0.001, help="object confidence threshold"
-    )
-    parser.add_argument(
-        "--iou-thres", type=float, default=0.65, help="IOU threshold for NMS"
-    )
-    parser.add_argument(
-        "--task", default="val", help="train, val, test, speed or study"
-    )
-    parser.add_argument(
-        "--device", default="", help="cuda device, i.e. 0 or 0,1,2,3 or cpu"
-    )
-    parser.add_argument(
-        "--single-cls", action="store_true", help="treat as single-class dataset"
-    )
+    parser.add_argument("--weights", nargs="+", type=str, default="yolov7.pt", help="model.pt path(s)")
+    parser.add_argument("--data", type=str, default="data/coco.yaml", help="*.data path")
+    parser.add_argument("--batch-size", type=int, default=32, help="size of each image batch")
+    parser.add_argument("--img-size", type=int, default=640, help="inference size (pixels)")
+    parser.add_argument("--conf-thres", type=float, default=0.001, help="object confidence threshold")
+    parser.add_argument("--iou-thres", type=float, default=0.65, help="IOU threshold for NMS")
+    parser.add_argument("--task", default="val", help="train, val, test, speed or study")
+    parser.add_argument("--device", default="", help="cuda device, i.e. 0 or 0,1,2,3 or cpu")
+    parser.add_argument("--single-cls", action="store_true", help="treat as single-class dataset")
     parser.add_argument("--augment", action="store_true", help="augmented inference")
     parser.add_argument("--verbose", action="store_true", help="report mAP by class")
     parser.add_argument("--save-txt", action="store_true", help="save results to *.txt")
-    parser.add_argument(
-        "--save-hybrid",
-        action="store_true",
-        help="save label+prediction hybrid results to *.txt",
-    )
-    parser.add_argument(
-        "--save-conf", action="store_true", help="save confidences in --save-txt labels"
-    )
-    parser.add_argument(
-        "--save-json",
-        action="store_true",
-        help="save a cocoapi-compatible JSON results file",
-    )
+    parser.add_argument("--save-hybrid", action="store_true", help="save label+prediction hybrid results to *.txt")
+    parser.add_argument("--save-conf", action="store_true", help="save confidences in --save-txt labels")
+    parser.add_argument("--save-json", action="store_true", help="save a cocoapi-compatible JSON results file")
     parser.add_argument("--project", default="runs/test", help="save to project/name")
     parser.add_argument("--name", default="exp", help="save to project/name")
-    parser.add_argument(
-        "--exist-ok",
-        action="store_true",
-        help="existing project/name ok, do not increment",
-    )
+    parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
     parser.add_argument("--no-trace", action="store_true", help="don`t trace model")
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith("coco.yaml")

@@ -1,0 +1,5 @@
+train: ../../datasets/processed/CBIS_DDSM_COCOFORMAT/train_imgs.txt
+val: ../../datasets/processed/CBIS_DDSM_COCOFORMAT/val_imgs.txt
+test: ../../datasets/processed/CBIS_DDSM_COCOFORMAT/test_imgs.txt
+nc: 1
+names: ["malignant"]

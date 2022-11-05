@@ -65,9 +65,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir=".", names
 
             # Recall
             recall = tpc / (n_l + 1e-16)  # recall curve
-            r[ci] = np.interp(
-                -px, -conf[i], recall[:, 0], left=0
-            )  # negative x, xp because xp decreases
+            r[ci] = np.interp(-px, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
 
             # Precision
             precision = tpc / (tpc + fpc)  # precision curve
@@ -144,11 +142,7 @@ class ConfusionMatrix:
 
         x = torch.where(iou > self.iou_thres)
         if x[0].shape[0]:
-            matches = (
-                torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1)
-                .cpu()
-                .numpy()
-            )
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
             if x[0].shape[0] > 1:
                 matches = matches[matches[:, 2].argsort()[::-1]]
                 matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
@@ -178,16 +172,12 @@ class ConfusionMatrix:
         try:
             import seaborn as sn
 
-            array = self.matrix / (
-                self.matrix.sum(0).reshape(1, self.nc + 1) + 1e-6
-            )  # normalize
+            array = self.matrix / (self.matrix.sum(0).reshape(1, self.nc + 1) + 1e-6)  # normalize
             array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
 
             fig = plt.figure(figsize=(12, 9), tight_layout=True)
             sn.set(font_scale=1.0 if self.nc < 50 else 0.8)  # for label size
-            labels = (0 < len(names) < 99) and len(
-                names
-            ) == self.nc  # apply names to ticklabels
+            labels = (0 < len(names) < 99) and len(names) == self.nc  # apply names to ticklabels
             sn.heatmap(
                 array,
                 annot=self.nc < 30,
@@ -213,20 +203,28 @@ class OD_AUCROC:
     # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
     def __init__(self, nc, iou_thres=0.5, fm_img_ths=1.0):
         # self.matrix = np.zeros((nc + 1, nc + 1))
-        if nc == 1:
-            self.roc_lesion = torchmetrics.ROC(num_classes=None)
-            self.roc_image = torchmetrics.ROC(num_classes=None)
-            self.roc_image_noloc = torchmetrics.ROC(num_classes=None)
-            self.class_modifier = 1
-        else:
-            self.roc_lesion = torchmetrics.ROC(num_classes=nc)
-            self.roc_image = torchmetrics.ROC(num_classes=nc)
-            self.roc_image_noloc = torchmetrics.ROC(num_classes=nc)
-            self.class_modifier = 0
+        # if nc == 1:
+        self.roc_lesion = torchmetrics.ROC(num_classes=None)
+        self.roc_image = torchmetrics.ROC(num_classes=None)
+        self.roc_image_noloc = torchmetrics.ROC(num_classes=None)
+        self.class_modifier = 1
+        # else:
+        #     self.roc_lesion = torchmetrics.ROC(num_classes=nc)
+        #     self.roc_image = torchmetrics.ROC(num_classes=nc)
+        #     self.roc_image_noloc = torchmetrics.ROC(num_classes=nc)
+        #     self.class_modifier = 0
         self.markers_in_normal_image = []
         self.nc = nc  # number of classes
         self.iou_thres = iou_thres
         self.fm_img_ths = fm_img_ths
+        if nc == 4:
+            self.malignant_cls_th = 2
+        elif nc == 2:
+            self.malignant_cls_th = 1
+        elif nc == 1:
+            self.malignant_cls_th = 0
+        else:
+            raise ValueError("nc should be 1, 2 or 4")
 
     def process_batch(self, detections, labels):
         """
@@ -240,50 +238,41 @@ class OD_AUCROC:
         """
         # detections = detections[detections[:, 4] > self.conf]
 
-        detection_probs = detections[:, 4].cpu()
-        nl = len(labels)
-        if len(detections) == 0:
+        mal_detections = detections[detections[:, 5] >= self.malignant_cls_th]
+        mal_labels = labels[labels[:, 0] >= self.malignant_cls_th]
+        mal_detections[:, 5] = 0
+        mal_labels[:, 0] = 0
+
+        detection_probs = mal_detections[:, 4].cpu()
+        nl = len(mal_labels)
+        if len(mal_detections) == 0:
             if nl == 0:
                 self.markers_in_normal_image.append(detection_probs)
                 self.roc_lesion.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
                 self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
                 self.roc_image_noloc.update(torch.Tensor([0.0]), torch.Tensor([0.0]))
             else:
-                self.roc_lesion.update(
-                    torch.Tensor([0.0] * nl), torch.Tensor([1.0] * nl)
-                )
+                self.roc_lesion.update(torch.Tensor([0.0] * nl), torch.Tensor([1.0] * nl))
                 self.roc_image.update(torch.Tensor([0.0]), torch.Tensor([1.0]))
                 self.roc_image_noloc.update(torch.Tensor([0.0]), torch.Tensor([1.0]))
             return
         else:
             if nl == 0:
                 self.markers_in_normal_image.append(detection_probs)
-                self.roc_lesion.update(
-                    torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0])
-                )
-                self.roc_image.update(
-                    torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0])
-                )
-                self.roc_image_noloc.update(
-                    torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0])
-                )
+                self.roc_lesion.update(torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0]))
+                self.roc_image.update(torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0]))
+                self.roc_image_noloc.update(torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([0.0]))
                 return
             else:
-                self.roc_image_noloc.update(
-                    torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([1.0])
-                )
+                self.roc_image_noloc.update(torch.max(detection_probs, 0, keepdim=True)[0], torch.Tensor([1.0]))
 
-        gt_classes = labels[:, 0].int() + self.class_modifier
-        detection_classes = detections[:, 5].int() + self.class_modifier
-        iou = general.box_iou(labels[:, 1:], detections[:, :4])
+        gt_classes = mal_labels[:, 0].int() + self.class_modifier
+        detection_classes = mal_detections[:, 5].int() + self.class_modifier
+        iou = general.box_iou(mal_labels[:, 1:], mal_detections[:, :4])
 
         x = torch.where(iou > self.iou_thres)
         if x[0].shape[0]:
-            matches = (
-                torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1)
-                .cpu()
-                .numpy()
-            )
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
             # if x[0].shape[0] > 1:
             #     matches = matches[matches[:, 2].argsort()[::-1]]
             #     matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
@@ -316,9 +305,7 @@ class OD_AUCROC:
         # Lesion level
         lesion_fpr, lesion_tpr, lesion_thresholds = self.roc_lesion.compute()
 
-        froc_lesion_tpr, froc_lesion_fm_img = self.froc_curve(
-            lesion_tpr, lesion_thresholds
-        )
+        froc_lesion_tpr, froc_lesion_fm_img = self.froc_curve(lesion_tpr, lesion_thresholds)
         auc_roc_lesion = torchmetrics.functional.auc(lesion_fpr, lesion_tpr)
         partial_fm_img_idx = froc_lesion_fm_img <= self.fm_img_ths
         pauc_froc_lesion = torchmetrics.functional.auc(
@@ -337,22 +324,13 @@ class OD_AUCROC:
         )
 
         # Image level non-local
-        (
-            image_nonlocal_frp,
-            image_nonlocal_tpr,
-            image_nonlocal_thresholds,
-        ) = self.roc_image_noloc.compute()
+        image_nonlocal_frp, image_nonlocal_tpr, image_nonlocal_thresholds = self.roc_image_noloc.compute()
 
-        auc_roc_image_nonloc = torchmetrics.functional.auc(
-            image_nonlocal_frp, image_nonlocal_tpr
-        )
-        froc_image_nonloc_tpr, froc_image_nonloc_fm_img = self.froc_curve(
-            image_nonlocal_tpr, image_nonlocal_thresholds
-        )
+        auc_roc_image_nonloc = torchmetrics.functional.auc(image_nonlocal_frp, image_nonlocal_tpr)
+        froc_image_nonloc_tpr, froc_image_nonloc_fm_img = self.froc_curve(image_nonlocal_tpr, image_nonlocal_thresholds)
         partial_fm_img_idx = froc_image_nonloc_fm_img <= self.fm_img_ths
         pauc_froc_image_nonloc = torchmetrics.functional.auc(
-            froc_image_nonloc_tpr[partial_fm_img_idx],
-            froc_image_nonloc_fm_img[partial_fm_img_idx],
+            froc_image_nonloc_tpr[partial_fm_img_idx], froc_image_nonloc_fm_img[partial_fm_img_idx]
         )
         return (
             auc_roc_lesion.item(),
@@ -419,9 +397,7 @@ def plot_pr_curve(px, py, ap, save_dir="pr_curve.png", names=()):
 
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py.T):
-            ax.plot(
-                px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}"
-            )  # plot(recall, precision)
+            ax.plot(px, y, linewidth=1, label=f"{names[i]} {ap[i, 0]:.3f}")  # plot(recall, precision)
     else:
         ax.plot(px, py, linewidth=1, color="grey")  # plot(recall, precision)
 
@@ -440,9 +416,7 @@ def plot_pr_curve(px, py, ap, save_dir="pr_curve.png", names=()):
     fig.savefig(Path(save_dir), dpi=250)
 
 
-def plot_mc_curve(
-    px, py, save_dir="mc_curve.png", names=(), xlabel="Confidence", ylabel="Metric"
-):
+def plot_mc_curve(px, py, save_dir="mc_curve.png", names=(), xlabel="Confidence", ylabel="Metric"):
     # Metric-confidence curve
     fig, ax = plt.subplots(1, 1, figsize=(9, 6), tight_layout=True)
 
