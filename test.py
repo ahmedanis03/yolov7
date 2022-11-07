@@ -326,6 +326,7 @@ def test(
     )
 
     # Print results per class
+    pf = "%20s" + "%12i" * 2 + "%12.3g" * 4  # print format
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
