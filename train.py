@@ -61,7 +61,6 @@ logger = logging.getLogger(__name__)
 
 
 def train(hyp, opt, device, tb_writer=None):
-
     logger.info(colorstr("hyperparameters: ") + ", ".join(f"{k}={v}" for k, v in hyp.items()))
     save_dir, epochs, batch_size, total_batch_size, weights, rank, freeze = (
         Path(opt.save_dir),
@@ -141,7 +140,10 @@ def train(hyp, opt, device, tb_writer=None):
         check_dataset(data_dict)  # check
     train_path = data_dict["train"]
     test_path = data_dict["val"]
-    final_test_path = data_dict["test"]
+    if data_dict.get("test", False):
+        final_test_path = data_dict["test"]
+    else:
+        final_test_path = None
 
     # Freeze
     freeze = [
@@ -338,21 +340,22 @@ def train(hyp, opt, device, tb_writer=None):
             prefix=colorstr("val: "),
         )[0]
 
-        final_testloader = create_dataloader(
-            final_test_path,
-            imgsz_test,
-            batch_size * 2,
-            gs,
-            opt,  # testloader
-            hyp=hyp,
-            cache=opt.cache_images and not opt.notest,
-            rect=True,
-            rank=-1,
-            world_size=opt.world_size,
-            workers=opt.workers,
-            pad=0.5,
-            prefix=colorstr("test: "),
-        )[0]
+        if final_test_path:
+            final_testloader = create_dataloader(
+                final_test_path,
+                imgsz_test,
+                batch_size * 2,
+                gs,
+                opt,  # testloader
+                hyp=hyp,
+                cache=opt.cache_images and not opt.notest,
+                rect=True,
+                rank=-1,
+                world_size=opt.world_size,
+                workers=opt.workers,
+                pad=0.5,
+                prefix=colorstr("test: "),
+            )[0]
 
         if not opt.resume:
             labels = np.concatenate(dataset.labels, 0)
@@ -475,6 +478,7 @@ def train(hyp, opt, device, tb_writer=None):
             # Forward
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
+                # print pred device
                 loss, loss_items = compute_loss_ota(pred, targets.to(device), imgs)  # loss scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
@@ -676,50 +680,51 @@ def train(hyp, opt, device, tb_writer=None):
         # ADD METRIC, update here
         final_epoch = True
 
-        test_results, test_maps, test_times, test_rocaucs = test.test(
-            data_dict,
-            batch_size=batch_size * 2,
-            imgsz=imgsz_test,
-            model=attempt_load(best, device).half(),
-            single_cls=opt.single_cls,
-            dataloader=final_testloader,
-            save_dir=save_dir,
-            verbose=nc < 50 and final_epoch,
-            plots=plots and final_epoch,
-            wandb_logger=wandb_logger,
-            compute_loss=compute_loss,
-            is_coco=is_coco,
-        )
+        if final_test_path:
+            test_results, test_maps, test_times, test_rocaucs = test.test(
+                data_dict,
+                batch_size=batch_size * 2,
+                imgsz=imgsz_test,
+                model=attempt_load(best, device).half(),
+                single_cls=opt.single_cls,
+                dataloader=final_testloader,
+                save_dir=save_dir,
+                verbose=nc < 50 and final_epoch,
+                plots=plots and final_epoch,
+                wandb_logger=wandb_logger,
+                compute_loss=compute_loss,
+                is_coco=is_coco,
+            )
 
-        # Write
-        with open(test_results_file, "a") as f:
+            # Write
+            with open(test_results_file, "a") as f:
+                # ADD METRIC, update here
+                f.write(s + "%10.4g" * 13 % (test_results + test_rocaucs) + "\n")  # append metrics, val_loss
+            if len(opt.name) and opt.bucket:
+                os.system("gsutil cp %s gs://%s/results/results%s.txt" % (test_results_file, opt.bucket, opt.name))
+
+            # Log
             # ADD METRIC, update here
-            f.write(s + "%10.4g" * 13 % (test_results + test_rocaucs) + "\n")  # append metrics, val_loss
-        if len(opt.name) and opt.bucket:
-            os.system("gsutil cp %s gs://%s/results/results%s.txt" % (test_results_file, opt.bucket, opt.name))
-
-        # Log
-        # ADD METRIC, update here
-        tags = [
-            "test_metrics/precision",
-            "test_metrics/recall",
-            "test_metrics/mAP_0.5",
-            "test_metrics/mAP_0.5:0.95",
-            "test_loss/box_loss",
-            "test_loss/obj_loss",
-            "test_loss/cls_loss",  # test loss
-            "test_(f)roc/lesion_auc",
-            "test_(f)roc/image_auc",
-            "test_(f)roc/image_auc_nonloc",
-            "test_(f)roc/lesion_pauc_froc",
-            "test_(f)roc/image_pauc_froc",
-            "test_(f)roc/image_pauc_nonloc_froc",
-        ]  # params
-        for x, tag in zip(list(test_results + test_rocaucs), tags):
-            if tb_writer:
-                tb_writer.add_scalar(tag, x, epoch)  # tensorboard
-            if wandb_logger.wandb:
-                wandb_logger.log({tag: x})  # W&B
+            tags = [
+                "test_metrics/precision",
+                "test_metrics/recall",
+                "test_metrics/mAP_0.5",
+                "test_metrics/mAP_0.5:0.95",
+                "test_loss/box_loss",
+                "test_loss/obj_loss",
+                "test_loss/cls_loss",  # test loss
+                "test_(f)roc/lesion_auc",
+                "test_(f)roc/image_auc",
+                "test_(f)roc/image_auc_nonloc",
+                "test_(f)roc/lesion_pauc_froc",
+                "test_(f)roc/image_pauc_froc",
+                "test_(f)roc/image_pauc_nonloc_froc",
+            ]  # params
+            for x, tag in zip(list(test_results + test_rocaucs), tags):
+                if tb_writer:
+                    tb_writer.add_scalar(tag, x, epoch)  # tensorboard
+                if wandb_logger.wandb:
+                    wandb_logger.log({tag: x})  # W&B
 
         # Strip optimizers
         final = best if best.exists() else last  # final model
@@ -800,7 +805,14 @@ if __name__ == "__main__":
         apriori = opt.global_rank, opt.local_rank
         with open(Path(ckpt).parent.parent / "opt.yaml") as f:
             opt = argparse.Namespace(**yaml.load(f, Loader=yaml.SafeLoader))  # replace
-        (opt.cfg, opt.weights, opt.resume, opt.batch_size, opt.global_rank, opt.local_rank,) = (
+        (
+            opt.cfg,
+            opt.weights,
+            opt.resume,
+            opt.batch_size,
+            opt.global_rank,
+            opt.local_rank,
+        ) = (
             "",
             ckpt,
             True,
