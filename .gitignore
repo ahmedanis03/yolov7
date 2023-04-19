@@ -1,0 +1,7 @@
+
+datasets
+**.pt
+**/runs
+**/wandb
+**/weights
+**/slurm_submit
