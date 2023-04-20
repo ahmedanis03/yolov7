@@ -676,7 +676,7 @@ def train(hyp, opt, device, tb_writer=None):
                 plots=plots and final_epoch,
                 wandb_logger=wandb_logger,
                 # FIXME: why!!
-                compute_loss=compute_loss,
+                compute_loss=None,
                 is_coco=is_coco,
             )
 
